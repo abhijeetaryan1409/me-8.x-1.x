@@ -1,0 +1,5 @@
+me.admin_settings_form:
+  route_name: me.admin_settings_form
+  title: Me Aliases
+  description: Configure the me aliases, and how they re matched.
+  parent: user.admin_index

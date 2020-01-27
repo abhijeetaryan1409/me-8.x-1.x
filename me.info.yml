@@ -1,0 +1,7 @@
+name: me Aliases
+description: Provides links to current users pages using me instead of the numerical user id.
+core: 8.x
+core_version_requirement: ^8 || ^9
+dependencies:
+  - domain_access
+type: module
