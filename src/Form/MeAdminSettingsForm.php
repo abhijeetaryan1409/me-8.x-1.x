@@ -10,8 +10,29 @@ namespace Drupal\me\Form;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Render\Element;
+use Drupal\token\Token;
+use Drupal\token\TreeBuilderInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 class MeAdminSettingsForm extends ConfigFormBase {
+
+  /**
+   * @var \Drupal\token\TreeBuilderInterface
+   */
+  protected $treeBuilder;
+
+  public function __construct(TreeBuilderInterface $tree_builder) {
+    $this->treeBuilder = $tree_builder;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container) {
+    return new static(
+      $container->get('token.tree_builder')
+    );
+  }
 
   /**
    * {@inheritdoc}
@@ -23,31 +44,13 @@ class MeAdminSettingsForm extends ConfigFormBase {
   /**
    * {@inheritdoc}
    */
-  public function submitForm(array &$form, FormStateInterface $form_state) {
-    $config = $this->config('me.settings');
-
-    foreach (Element::children($form) as $variable) {
-      $config->set($variable, $form_state->getValue($form[$variable]['#parents']));
-    }
-    $config->save();
-
-    if (method_exists($this, '_submitForm')) {
-      $this->_submitForm($form, $form_state);
-    }
-
-    parent::submitForm($form, $form_state);
-  }
-
-  /**
-   * {@inheritdoc}
-   */
   protected function getEditableConfigNames() {
     return ['me.settings'];
   }
 
-  public function buildForm(array $form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  public function buildForm(array $form, FormStateInterface $form_state) {
     $form = [];
-
+    $theme = '';
     $form['me_alias'] = [
       '#type' => 'textfield',
       '#title' => t("'Me' Alias"),
@@ -55,24 +58,22 @@ class MeAdminSettingsForm extends ConfigFormBase {
       '#default_value' => me_variable_get('me_alias'),
       '#required' => TRUE,
     ];
-    // @FIXME
-    // theme() has been renamed to _theme() and should NEVER be called directly.
-    // Calling _theme() directly can alter the expected output and potentially
-    // introduce security issues (see https://www.drupal.org/node/2195739). You
-    // should use renderable arrays instead.
-    // 
-    // 
-    // @see https://www.drupal.org/node/2195739
-    // $form['me_token_help'] = array(
-    //     '#title' => t('Replacement patterns for me alias'),
-    //     '#type' => 'fieldset',
-    //     '#collapsible' => TRUE,
-    //     '#collapsed' => TRUE,
-    //     'help' => array(
-    //       '#type' => 'markup',
-    //       '#markup' => theme('token_tree')
-    //     ),
-    //   );
+
+    // The theme_token_tree_link really only works if the token_types variable
+    // is available.
+    $info = token_theme();
+
+    if (isset($info['token_tree_link']['variables']['token_types'])) {
+      $theme = 'token_tree_link';
+    }
+    else {
+      $theme = 'token_tree';
+    }
+
+    $form['me_token_help'] = [
+    '#theme' => $theme,
+    '#token_types' => array($instance['entity_type']),
+    ];
 
     $form['me_case_insensitive'] = [
       '#type' => 'checkbox',
@@ -140,12 +141,14 @@ class MeAdminSettingsForm extends ConfigFormBase {
           '%php' => '<?php ?>'
           ]);
       }
+
       $form['me_paths_settings']['me_path_rule'] = [
         '#type' => 'radios',
         '#title' => t('Use me alias on specific paths'),
         '#options' => $options,
         '#default_value' => $path_rule,
       ];
+
       $form['me_paths_settings']['me_paths'] = [
         '#type' => 'textarea',
         '#title' => t('Paths'),
@@ -154,32 +157,24 @@ class MeAdminSettingsForm extends ConfigFormBase {
       ];
     }
 
-    $form['#validate'] = ['me_admin_settings_form_validate'];
-
     $form = parent::buildForm($form, $form_state);
-
-    // Quite a few options only have an affect on theme and menu rebuilds. We just do them here
-    // to make sure the options have an instant effect.
-    $form['#submit'][] = 'menu_rebuild';
-    $form['#submit'][] = 'drupal_theme_rebuild';
-
     return $form;
   }
 
   public function validateForm(array &$form, \Drupal\Core\Form\FormStateInterface $form_state) {
-    // If the token module is installed, we need to also allow a list of tokens
+  // If the token module is installed, we need to also allow a list of tokens
   // that are allowed to match against. We include all global tokens here, even though
   // some of them don't really make sense, but that is up to the end user.
     $token_list = [];
-    //$token_list = array_map(create_function('$n', 'return "[$n]";'), array_keys(array_pop(token_info())));
-    $tk_types = token_get_global_token_types();
+    $token_service = \Drupal::token();
+    $tk_types = $token_service->getGlobalTokenTypes();
     $options = [
       'flat' => TRUE,
       'restricted' => FALSE,
       'depth' => 4,
     ];
     foreach ($tk_types as $type) {
-      $tree = token_build_tree($type, $options);
+      $tree = $this->treeBuilder->buildTree($type, $options);
       $token_list = array_merge($token_list, array_keys($tree));
     }
     if (preg_match('/[^a-zA-Z\:]/', $form_state->getValue(['me_alias'])) && !in_array($form_state->getValue(['me_alias']), $token_list)) {
@@ -191,6 +186,24 @@ class MeAdminSettingsForm extends ConfigFormBase {
       }
       $form_state->setErrorByName('me_alias', $message);
     }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function submitForm(array &$form, FormStateInterface $form_state) {
+    $config = $this->config('me.settings');
+
+    foreach (Element::children($form) as $variable) {
+      $config->set($variable, $form_state->getValue($form[$variable]['#parents']));
+    }
+    $config->save();
+
+    if (method_exists($this, '_submitForm')) {
+      $this->_submitForm($form, $form_state);
+    }
+
+    parent::submitForm($form, $form_state);
   }
 
 }
